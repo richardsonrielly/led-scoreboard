@@ -1,0 +1,16 @@
+# Starts the scoreboard automatically when the Pi boots.
+# Installed by deploy/install.sh into /etc/systemd/system/
+[Unit]
+Description=LED sports scoreboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/home/pi/led-scoreboard
+ExecStart=/usr/bin/python3 -m scoreboard.main
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target
