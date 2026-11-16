@@ -10,10 +10,18 @@ web page on your phone, so you never have to open the box.
 
 - Shows **just your teams** or **every game** in the leagues you pick
 - Teams in team colors, live games in green, start times in yellow, finals in gray (losing team dimmed)
-- A settings page at `http://<pi-name>.local:8080` with:
-  - which leagues to check and which teams to follow (codes like `NYJ`, or names like `Siena`)
-  - brightness, seconds per game, how often to refresh scores
-  - show or hide upcoming and finished games
+- **Live game details**, each one switchable on or off:
+  - ⚾ Baseball: top/bottom of the inning, balls and strikes, outs, runners on base, batter, pitcher
+  - 🏈 Football: who has the ball, down and distance, a field map with the yellow first-down line, red zone alert
+- A kid-friendly **settings page** for any phone or tablet browser on your Wi-Fi:
+  - see what's on the board right now
+  - "My teams" or "Every game", a brightness slider, a speed slider
+  - turn sports on and off, tap team logos to pick favorites, flip switches for the extra details
+  - grown-up settings: board name, refresh rate, show/hide upcoming and finished games
+
+| Settings page | Team picker |
+|---|---|
+| ![settings](docs/settings-page.png) | ![teams](docs/team-picker.png) |
 - Leagues: NFL, MLB, NBA, NHL, WNBA, MLS, Premier League, college football,
   men's college basketball (all of Division I), and the USMNT (friendlies, Nations League,
   Gold Cup, World Cup and qualifying). Add more in `scoreboard/leagues.py`.
@@ -38,7 +46,15 @@ Scores come from ESPN's public scoreboard feed (no account or API key needed).
    cd led-scoreboard
    bash deploy/install.sh
    ```
-4. Open `http://scoreboard.local:8080` on your phone and pick your teams.
+4. When the scoreboard starts, it shows its address for 10 seconds (e.g. `192.168.1.42:8080`).
+   Open `http://192.168.1.42:8080` in a browser on your phone or tablet and pick your teams.
+
+### Using it from a kid's Fire tablet
+
+- Use the **number address** shown on the board, not `scoreboard.local`. Fire tablets usually can't find `.local` names.
+- If the tablet uses an **Amazon Kids** profile, the browser only opens approved sites. Add the scoreboard's
+  address in the Amazon Parent Dashboard (Web browser → allowed websites).
+- Tip: give the Pi a fixed address in your router's settings (often called a "DHCP reservation") so the link never changes.
 
 ## Trying it without a Pi
 
@@ -48,6 +64,7 @@ On any computer with Python 3:
 pip install -r requirements.txt
 python3 -m scoreboard.main --console   # draws the panel in your terminal
 python3 tools/preview.py               # saves preview.png with sample games
+python3 tools/preview.py 128           # same, for two chained panels (128x32)
 python3 -m unittest discover tests     # runs the tests
 ```
 
@@ -60,9 +77,10 @@ The settings page also runs at `http://localhost:8080` while it's going.
 | `scoreboard/main.py` | The main loop: get scores, show each one, repeat |
 | `scoreboard/espn.py` | Downloads scores and picks which games to show |
 | `scoreboard/leagues.py` | The list of leagues and where their scores come from |
-| `scoreboard/render.py` | Draws a game onto a 64×32 picture with a tiny pixel font |
+| `scoreboard/render.py` | Draws a game onto a 64×32 picture with a tiny pixel font, plus the baseball and football detail pages |
 | `scoreboard/display.py` | Sends the picture to the LED panel (or the terminal) |
-| `scoreboard/web.py` | The settings web page |
+| `scoreboard/web.py` | The settings page's server and its small JSON API |
+| `scoreboard/static/index.html` | The settings page itself (HTML, CSS and JavaScript) |
 | `scoreboard/config.py` | Default settings, and loading/saving `config.json` |
 
 ## Day-to-day Git workflow
@@ -95,6 +113,15 @@ sudo systemctl status scoreboard     # is it running?
 journalctl -u scoreboard -f          # watch its log
 sudo systemctl restart scoreboard    # restart after a git pull
 ```
+
+## Adding details for another sport
+
+1. Add the options to `DETAILS` in `scoreboard/leagues.py` (they appear as switches on the settings page automatically).
+2. Read the values from ESPN's `situation` block in `parse_situation()` in `scoreboard/espn.py`.
+3. Write a `<sport>_pages()` function in `scoreboard/render.py` and add it to `DETAIL_LAYOUTS`.
+
+On a 64-wide panel the details get their own page after the score. On a 128-wide panel (two panels chained,
+`chain_length: 2`) they appear next to the score.
 
 ## Ideas for later
 

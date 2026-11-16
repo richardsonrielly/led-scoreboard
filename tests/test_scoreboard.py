@@ -66,3 +66,57 @@ class TestScoreboard(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestDetails(unittest.TestCase):
+    def test_baseball_details_page(self):
+        from scoreboard.render import render_pages
+        g = Game("mlb", "in", "BOT 5TH", "", Team("ATL", "Braves", "3", "", ""), Team("NYM", "Mets", "4", "", ""),
+                 situation={"half": "bottom", "inning": 5, "balls": 2, "strikes": 1, "outs": 1,
+                            "on_first": True, "batter": "F. Lindor", "pitcher": "S. Strider"})
+        self.assertEqual(len(render_pages(g, {"details": {}})), 3)       # score, batter, pitcher
+        off = {"details": {"mlb": {"batter": False, "pitcher": False}}}
+        self.assertEqual(len(render_pages(g, off)), 2)                    # score, diamond
+        self.assertEqual(len(render_pages(g, {"details": {}}, width=128)), 2)  # side by side
+
+    def test_football_spot_from_text(self):
+        data = {"events": [{"competitions": [{
+            "status": {"type": {"state": "in", "shortDetail": "4:12 - 3rd"}},
+            "situation": {"possession": "20", "possessionText": "NYJ 35", "shortDownDistanceText": "2nd & 7"},
+            "competitors": [competitor("MIA", "Miami Dolphins", "3", "away"),
+                            competitor("NYJ", "New York Jets", "7", "home")]}]}]}
+        data["events"][0]["competitions"][0]["competitors"][1]["team"]["id"] = "20"
+        s = parse_scoreboard(data, "nfl")[0].situation
+        self.assertEqual((s["possession"], s["yards_to_goal"]), ("home", 65))
+
+
+class TestWeb(unittest.TestCase):
+    def setUp(self):
+        import os
+        import tempfile
+        from scoreboard import config
+        self.path = os.path.join(tempfile.mkdtemp(), "config.json")
+        self._orig = config.CONFIG_PATH
+        config.load.__defaults__ = (self.path,)
+        config.save.__defaults__ = (self.path,)
+        from scoreboard import web
+        self.client = web.app.test_client()
+
+    def tearDown(self):
+        from scoreboard import config
+        config.load.__defaults__ = (self._orig,)
+        config.save.__defaults__ = (self._orig,)
+
+    def test_update_only_known_values(self):
+        r = self.client.post("/api/config", json={"brightness": 500, "mode": "all", "hack": 1,
+                                                   "details": {"mlb": {"batter": False, "nope": True}}})
+        cfg = r.get_json()["config"]
+        self.assertEqual((cfg["brightness"], cfg["mode"]), (100, "all"))
+        self.assertNotIn("hack", cfg)
+        self.assertEqual(cfg["details"]["mlb"], {"batter": False})
+
+    def test_page_and_preview(self):
+        self.assertEqual(self.client.get("/").status_code, 200)
+        self.assertEqual(self.client.get("/now.png").mimetype, "image/png")
+        leagues = self.client.get("/api/config").get_json()["leagues"]
+        self.assertTrue(any(lg["key"] == "mlb" and lg["details"] for lg in leagues))
