@@ -1,105 +1,112 @@
-"""A small settings page served by the Pi. Open http://<pi-name>.local:8080 on a phone."""
-from flask import Flask, redirect, render_template_string, request
+"""The settings page, served by the Pi. Open http://<pi-address>:8080 on a phone or tablet.
+
+The page itself is scoreboard/static/index.html. It talks to these small
+JSON endpoints:
+    GET  /api/config          current settings + the list of leagues
+    POST /api/config          change some settings (only the keys you send)
+    GET  /api/teams/<league>  teams with logos, for the team picker
+    GET  /now.png             a picture of what the board is showing right now
+"""
+import io
+import os
+import threading
+
+from flask import Flask, jsonify, request, send_file, send_from_directory
 
 from . import config
 from .espn import fetch_teams
-from .leagues import LEAGUES
+from .leagues import LEAGUES, details_for
+from .render import led_look, render_message
 
-app = Flask(__name__)
+STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+app = Flask(__name__, static_folder=None)
 _team_cache = {}
 
-PAGE = """
-<!doctype html>
-<html><head>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Scoreboard settings</title>
-<style>
- body{font-family:system-ui,sans-serif;max-width:640px;margin:auto;padding:16px;background:#111;color:#eee}
- h1{font-size:1.4em} fieldset{border:1px solid #333;border-radius:8px;margin:12px 0;padding:12px}
- legend{font-weight:600} label{display:block;margin:6px 0}
- input[type=text]{width:100%;padding:8px;background:#222;color:#eee;border:1px solid #444;border-radius:6px}
- input[type=range]{width:100%} .hint{color:#999;font-size:.85em}
- button{background:#2a7;color:#fff;border:0;padding:12px 20px;border-radius:8px;font-size:1em;width:100%}
- .saved{background:#264;padding:8px;border-radius:6px} a{color:#6cf}
-</style></head><body>
-<h1>🏟️ Scoreboard settings</h1>
-{% if saved %}<p class="saved">Saved! The scoreboard will update in a moment.</p>{% endif %}
-<form method="post">
-<fieldset><legend>What to show</legend>
- <label><input type="radio" name="mode" value="favorites" {{'checked' if cfg.mode=='favorites'}}> Just my teams</label>
- <label><input type="radio" name="mode" value="all" {{'checked' if cfg.mode=='all'}}> Every game in the leagues below</label>
- <label><input type="checkbox" name="show_upcoming" {{'checked' if cfg.show_upcoming}}> Show games that haven't started</label>
- <label><input type="checkbox" name="show_final" {{'checked' if cfg.show_final}}> Show finished games</label>
-</fieldset>
-<fieldset><legend>Leagues and teams</legend>
- <p class="hint">Type team codes or names, separated by commas (e.g. <b>NYJ, GB</b> or <b>Siena</b>).</p>
- {% for key, info in leagues.items() %}
-  <label><input type="checkbox" name="league_{{key}}" {{'checked' if key in cfg.leagues}}> <b>{{info.name}}</b>
-   — <a href="/teams/{{key}}" target="_blank">team codes</a></label>
-  <input type="text" name="fav_{{key}}" value="{{ ', '.join(cfg.favorites.get(key, [])) }}">
- {% endfor %}
-</fieldset>
-<fieldset><legend>Display</legend>
- <label>Brightness: <output id="b">{{cfg.brightness}}</output>%
-  <input type="range" name="brightness" min="1" max="100" value="{{cfg.brightness}}" oninput="b.value=this.value"></label>
- <label>Seconds per game: <output id="s">{{cfg.seconds_per_game}}</output>
-  <input type="range" name="seconds_per_game" min="2" max="30" value="{{cfg.seconds_per_game}}" oninput="s.value=this.value"></label>
- <label>Check for new scores every: <output id="r">{{cfg.refresh_seconds}}</output> seconds
-  <input type="range" name="refresh_seconds" min="15" max="300" step="15" value="{{cfg.refresh_seconds}}" oninput="r.value=this.value"></label>
-</fieldset>
-<button type="submit">Save</button>
-</form></body></html>
-"""
-
-TEAMS_PAGE = """
-<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1">
-<style>body{font-family:system-ui;background:#111;color:#eee;padding:16px} td{padding:3px 10px}</style>
-</head><body><h2>{{name}} team codes</h2>
-{% if not teams %}<p>Couldn't load the team list right now.</p>{% endif %}
-<table>{% for code, n in teams %}<tr><td><b>{{code}}</b></td><td>{{n}}</td></tr>{% endfor %}</table>
-</body></html>
-"""
+# The main loop puts each picture it shows here, so the page can show it too.
+current_image = None
+_image_lock = threading.Lock()
 
 
-class _Attr(dict):
-    __getattr__ = dict.get
+def set_current_image(img):
+    global current_image
+    with _image_lock:
+        current_image = img
 
 
-@app.route("/", methods=["GET", "POST"])
-def settings():
+@app.route("/")
+def index():
+    return send_from_directory(STATIC, "index.html")
+
+
+@app.route("/api/config", methods=["GET"])
+def get_config():
+    leagues = [{"key": k, "name": v["name"], "emoji": v["emoji"], "sport": v["sport"],
+                "details": [{"key": dk, "label": label, "emoji": e} for dk, label, e in details_for(k)]}
+               for k, v in LEAGUES.items()]
+    return jsonify({"config": config.load(), "leagues": leagues})
+
+
+def _clamp_int(value, lo, hi):
+    return max(lo, min(hi, int(value)))
+
+
+@app.route("/api/config", methods=["POST"])
+def update_config():
+    """Only the keys we know about are accepted, and numbers are kept in range."""
+    data = request.get_json(force=True, silent=True) or {}
     cfg = config.load()
-    saved = False
-    if request.method == "POST":
-        f = request.form
-        cfg["mode"] = "all" if f.get("mode") == "all" else "favorites"
-        cfg["show_upcoming"] = "show_upcoming" in f
-        cfg["show_final"] = "show_final" in f
-        cfg["leagues"] = [k for k in LEAGUES if f"league_{k}" in f]
-        cfg["favorites"] = {
-            k: [t.strip() for t in f.get(f"fav_{k}", "").split(",") if t.strip()]
-            for k in LEAGUES
-        }
+    try:
+        if data.get("mode") in ("favorites", "all"):
+            cfg["mode"] = data["mode"]
+        if isinstance(data.get("leagues"), list):
+            cfg["leagues"] = [k for k in LEAGUES if k in data["leagues"]]
+        if isinstance(data.get("favorites"), dict):
+            for k, teams in data["favorites"].items():
+                if k in LEAGUES and isinstance(teams, list):
+                    cfg["favorites"][k] = [str(t).strip()[:40] for t in teams if str(t).strip()]
+        if isinstance(data.get("details"), dict):
+            for k, opts in data["details"].items():
+                if k in LEAGUES and isinstance(opts, dict):
+                    known = {dk for dk, _, _ in details_for(k)}
+                    cfg.setdefault("details", {}).setdefault(k, {}).update(
+                        {dk: bool(v) for dk, v in opts.items() if dk in known})
         for key, lo, hi in (("brightness", 1, 100), ("seconds_per_game", 2, 30),
                             ("refresh_seconds", 15, 300)):
-            try:
-                cfg[key] = max(lo, min(hi, int(f.get(key, cfg[key]))))
-            except ValueError:
-                pass
-        config.save(cfg)
-        return redirect("/?saved=1")
-    saved = request.args.get("saved") == "1"
-    return render_template_string(PAGE, cfg=_Attr(cfg), leagues={k: _Attr(v) for k, v in LEAGUES.items()},
-                                  saved=saved)
+            if key in data:
+                cfg[key] = _clamp_int(data[key], lo, hi)
+        for key in ("show_upcoming", "show_final"):
+            if key in data:
+                cfg[key] = bool(data[key])
+        if isinstance(data.get("title"), str) and data["title"].strip():
+            cfg["title"] = data["title"].strip()[:30]
+    except (TypeError, ValueError):
+        return jsonify({"error": "bad value"}), 400
+    config.save(cfg)
+    return jsonify({"config": cfg})
 
 
-@app.route("/teams/<league>")
+@app.route("/api/teams/<league>")
 def teams(league):
     if league not in LEAGUES:
-        return "Unknown league", 404
+        return jsonify([]), 404
     if not _team_cache.get(league):
         _team_cache[league] = fetch_teams(league)
-    return render_template_string(TEAMS_PAGE, name=LEAGUES[league]["name"], teams=_team_cache[league])
+    return jsonify(_team_cache[league])
+
+
+@app.route("/now.png")
+def now_png():
+    with _image_lock:
+        img = current_image
+    if img is None:
+        img = render_message(["STARTING..."])
+    buf = io.BytesIO()
+    led_look(img, dot=6).save(buf, "PNG")
+    buf.seek(0)
+    resp = send_file(buf, mimetype="image/png")
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 def run(port):
-    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False, threaded=True)
