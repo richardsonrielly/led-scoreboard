@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scoreboard</title>
+<style>
+  :root { --bg:#0e1420; --card:#1a2233; --line:#2a3550; --text:#f2f5fa; --muted:#93a0b8;
+          --go:#2fbf71; --star:#ffc531; --accent:#4c8dff; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:18px/1.35 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width:760px; margin:auto; padding:16px 16px 80px; }
+  h1 { font-size:1.7em; margin:6px 0 14px; display:flex; align-items:center; gap:10px; }
+  h2 { font-size:1.15em; margin:0 0 12px; }
+  .card { background:var(--card); border-radius:20px; padding:16px; margin:14px 0; }
+  .board { width:100%; border-radius:12px; display:block; background:#000; image-rendering:pixelated; }
+  .row { display:flex; gap:12px; }
+  .big { flex:1; border:3px solid var(--line); background:#121a29; color:var(--text);
+         border-radius:18px; padding:16px 8px; font-size:1.1em; font-weight:700; cursor:pointer; }
+  .big .e { display:block; font-size:2em; margin-bottom:4px; }
+  .big.on { border-color:var(--star); background:#2a2614; }
+  .slider { display:flex; align-items:center; gap:12px; font-size:1.8em; }
+  input[type=range] { flex:1; height:44px; accent-color:var(--star); }
+  .sports { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:12px; }
+  .sport { border:3px solid var(--line); border-radius:18px; padding:12px; text-align:center;
+           background:#121a29; cursor:pointer; position:relative; }
+  .sport.on { border-color:var(--go); background:#13291f; }
+  .sport .e { font-size:2.4em; }
+  .sport .n { font-weight:700; margin:2px 0 6px; min-height:2.6em; display:flex; align-items:center; justify-content:center; }
+  .sport .count { color:var(--muted); font-size:.85em; }
+  .sport button { margin-top:8px; width:100%; border:0; border-radius:12px; padding:10px;
+                  background:var(--accent); color:#fff; font-size:.95em; font-weight:700; }
+  .pill { position:absolute; top:8px; right:8px; font-size:.75em; font-weight:800;
+          padding:3px 8px; border-radius:99px; background:#333c52; color:var(--muted); }
+  .sport.on .pill { background:var(--go); color:#062; }
+  /* team picker */
+  .sheet { position:fixed; inset:0; background:var(--bg); overflow:auto; display:none; z-index:5; }
+  .sheet.open { display:block; }
+  .sheet header { position:sticky; top:0; background:var(--bg); padding:14px 16px 10px;
+                  border-bottom:1px solid var(--line); z-index:2; }
+  .sheet header .top { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .done { border:0; border-radius:14px; background:var(--go); color:#fff; font-weight:800;
+          font-size:1.05em; padding:12px 22px; }
+  .search { width:100%; margin-top:10px; padding:14px 16px; font-size:1em; border-radius:14px;
+            border:2px solid var(--line); background:#121a29; color:var(--text); }
+  .teams { display:grid; grid-template-columns:repeat(auto-fill,minmax(110px,1fr)); gap:10px; }
+  .team { border:3px solid var(--line); border-radius:16px; padding:10px 6px; text-align:center;
+          background:#121a29; cursor:pointer; position:relative; }
+  .team img { width:64px; height:64px; object-fit:contain; }
+  .team .ph { width:64px; height:64px; margin:auto; border-radius:50%; display:flex;
+              align-items:center; justify-content:center; font-weight:800; }
+  .team .tn { font-size:.8em; margin-top:4px; }
+  .team.on { border-color:var(--star); background:#2a2614; }
+  .team.on::after { content:"⭐"; position:absolute; top:4px; right:6px; font-size:1.1em; }
+  .toggle { display:flex; align-items:center; gap:12px; padding:12px 4px; border-bottom:1px solid var(--line); cursor:pointer; }
+  .toggle:last-child { border-bottom:0; }
+  .toggle .e { font-size:1.6em; width:1.6em; text-align:center; }
+  .toggle .l { flex:1; }
+  .sw { width:62px; height:36px; border-radius:99px; background:#3a4560; position:relative; flex:none; transition:.15s; }
+  .sw::after { content:""; position:absolute; top:4px; left:4px; width:28px; height:28px; border-radius:50%; background:#fff; transition:.15s; }
+  .on > .sw { background:var(--go); }
+  .on > .sw::after { left:30px; }
+  .muted { color:var(--muted); }
+  details summary { cursor:pointer; font-weight:700; }
+  details label { display:block; margin:12px 0; }
+  details input[type=text], details input[type=number] { width:100%; padding:10px; border-radius:10px;
+            border:2px solid var(--line); background:#121a29; color:var(--text); font-size:1em; }
+  .toast { position:fixed; left:50%; bottom:20px; transform:translateX(-50%) translateY(120px);
+           background:var(--go); color:#fff; font-weight:800; padding:12px 22px; border-radius:99px;
+           transition:.25s; z-index:9; }
+  .toast.show { transform:translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+<main>
+  <h1>🏟️ <span id="title">Scoreboard</span></h1>
+
+  <div class="card">
+    <h2>📺 On the scoreboard right now</h2>
+    <img id="now" class="board" alt="What the scoreboard is showing">
+  </div>
+
+  <div class="card">
+    <h2>What should it show?</h2>
+    <div class="row">
+      <button class="big" id="mode-favorites"><span class="e">⭐</span>My teams</button>
+      <button class="big" id="mode-all"><span class="e">🌎</span>Every game</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>How bright?</h2>
+    <div class="slider">🌙<input type="range" id="brightness" min="5" max="100">☀️</div>
+  </div>
+
+  <div class="card">
+    <h2>How fast should it flip?</h2>
+    <div class="slider">🐢<input type="range" id="speed" min="2" max="20">🐇</div>
+  </div>
+
+  <div class="card">
+    <h2>Sports</h2>
+    <p class="muted" style="margin-top:-6px">Tap a sport to turn it on or off. Tap <b>Pick teams</b> to choose your teams.</p>
+    <div class="sports" id="sports"></div>
+  </div>
+
+  <div class="card">
+    <details>
+      <summary>🔧 Grown-up settings</summary>
+      <label>Scoreboard name<input type="text" id="g-title" maxlength="30"></label>
+      <label>Check for new scores every (seconds)<input type="number" id="g-refresh" min="15" max="300" step="15"></label>
+      <div class="toggle" id="g-upcoming"><span class="l">Show games that haven't started</span><span class="sw"></span></div>
+      <div class="toggle" id="g-final"><span class="l">Show finished games</span><span class="sw"></span></div>
+    </details>
+  </div>
+</main>
+
+<!-- Team picker for one sport -->
+<section class="sheet" id="sheet">
+  <header>
+    <div class="top"><h2 id="sheet-title" style="margin:0"></h2><button class="done" id="done">Done ✓</button></div>
+    <input class="search" id="search" placeholder="🔍 Find a team" autocomplete="off">
+  </header>
+  <main>
+    <div class="card" id="extras-card">
+      <h2>✨ Extra stuff to show during games</h2>
+      <div id="extras"></div>
+    </div>
+    <div class="card">
+      <h2>⭐ Tap your teams</h2>
+      <div class="teams" id="teams"><p class="muted">Loading teams…</p></div>
+    </div>
+  </main>
+</section>
+
+<div class="toast" id="toast">Saved! ✅</div>
+
+<script>
+let cfg = null, leagues = [], teamCache = {}, openLeague = null;
+const $ = (id) => document.getElementById(id);
+
+// ---- talking to the scoreboard ----
+async function load() {
+  const r = await fetch("/api/config");
+  const data = await r.json();
+  cfg = data.config; leagues = data.leagues;
+  render();
+}
+let toastTimer;
+async function save(changes) {
+  Object.assign(cfg, changes);
+  render();
+  const r = await fetch("/api/config", { method: "POST", headers: { "Content-Type": "application/json" },
+                                         body: JSON.stringify(changes) });
+  if (r.ok) cfg = (await r.json()).config;
+  const t = $("toast"); t.textContent = r.ok ? "Saved! ✅" : "Oops, didn't save 😕";
+  t.classList.add("show"); clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), 1400);
+}
+
+// ---- same team-matching rule as the scoreboard uses ----
+function matches(team, entry) {
+  const w = entry.trim().toLowerCase();
+  if (!w) return false;
+  if (w === team.abbr.toLowerCase()) return true;
+  return w.length >= 4 && team.name.toLowerCase().includes(w);
+}
+const favs = (lg) => cfg.favorites[lg] || [];
+const isFav = (lg, team) => favs(lg).some((e) => matches(team, e));
+const detailOn = (lg, key) => ((cfg.details || {})[lg] || {})[key] !== false;
+
+// ---- main page ----
+function render() {
+  $("title").textContent = cfg.title || "Scoreboard";
+  document.title = cfg.title || "Scoreboard";
+  $("mode-favorites").classList.toggle("on", cfg.mode === "favorites");
+  $("mode-all").classList.toggle("on", cfg.mode === "all");
+  $("brightness").value = cfg.brightness;
+  $("speed").value = 22 - cfg.seconds_per_game;           // right = faster
+  if (document.activeElement !== $("g-title")) $("g-title").value = cfg.title || "";
+  $("g-refresh").value = cfg.refresh_seconds;
+  $("g-upcoming").classList.toggle("on", cfg.show_upcoming);
+  $("g-final").classList.toggle("on", cfg.show_final);
+
+  const box = $("sports"); box.innerHTML = "";
+  for (const lg of leagues) {
+    const on = cfg.leagues.includes(lg.key);
+    const n = favs(lg.key).length;
+    const el = document.createElement("div");
+    el.className = "sport" + (on ? " on" : "");
+    el.innerHTML = `<span class="pill">${on ? "ON" : "OFF"}</span><div class="e">${lg.emoji}</div>
+      <div class="n">${lg.name}</div><div class="count">${n ? "⭐ " + n + (n === 1 ? " team" : " teams") : "No teams yet"}</div>
+      <button>Pick teams</button>`;
+    el.onclick = () => {
+      const list = on ? cfg.leagues.filter((k) => k !== lg.key) : [...cfg.leagues, lg.key];
+      save({ leagues: list });
+    };
+    el.querySelector("button").onclick = (ev) => { ev.stopPropagation(); openSheet(lg); };
+    box.appendChild(el);
+  }
+  if (openLeague) renderSheet();
+}
+
+$("mode-favorites").onclick = () => save({ mode: "favorites" });
+$("mode-all").onclick = () => save({ mode: "all" });
+$("brightness").onchange = (e) => save({ brightness: +e.target.value });
+$("speed").onchange = (e) => save({ seconds_per_game: 22 - +e.target.value });
+$("g-title").onchange = (e) => save({ title: e.target.value });
+$("g-refresh").onchange = (e) => save({ refresh_seconds: +e.target.value });
+$("g-upcoming").onclick = () => save({ show_upcoming: !cfg.show_upcoming });
+$("g-final").onclick = () => save({ show_final: !cfg.show_final });
+
+// ---- team picker ----
+async function openSheet(lg) {
+  openLeague = lg; $("search").value = "";
+  $("sheet").classList.add("open"); document.body.style.overflow = "hidden";
+  $("sheet").scrollTop = 0;
+  renderSheet();
+  if (!teamCache[lg.key]) {
+    try { teamCache[lg.key] = await (await fetch("/api/teams/" + lg.key)).json(); }
+    catch { teamCache[lg.key] = []; }
+    renderSheet();
+  }
+}
+$("done").onclick = () => { openLeague = null; $("sheet").classList.remove("open"); document.body.style.overflow = ""; render(); };
+$("search").oninput = () => renderSheet();
+
+function renderSheet() {
+  const lg = openLeague;
+  $("sheet-title").textContent = lg.emoji + " " + lg.name;
+
+  // Extra details switches
+  const ex = $("extras"); ex.innerHTML = "";
+  if (!lg.details.length) {
+    ex.innerHTML = `<p class="muted">Nothing extra for ${lg.name} yet. Coming soon! 🚧</p>`;
+  }
+  for (const d of lg.details) {
+    const on = detailOn(lg.key, d.key);
+    const el = document.createElement("div");
+    el.className = "toggle" + (on ? " on" : "");
+    el.innerHTML = `<span class="e">${d.emoji}</span><span class="l">${d.label}</span><span class="sw"></span>`;
+    el.onclick = () => {
+      const details = { ...(cfg.details || {}) };
+      details[lg.key] = { ...(details[lg.key] || {}), [d.key]: !on };
+      save({ details });
+    };
+    ex.appendChild(el);
+  }
+
+  // Team logos
+  const teams = teamCache[lg.key];
+  const box = $("teams");
+  if (!teams) { box.innerHTML = `<p class="muted">Loading teams…</p>`; return; }
+  if (!teams.length) {
+    box.innerHTML = `<p class="muted">Couldn't load the teams right now. Type team codes, separated by commas:</p>
+      <input class="search" id="codes" value="${favs(lg.key).join(", ")}">`;
+    $("codes").onchange = (e) => save({ favorites: { ...cfg.favorites,
+      [lg.key]: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } });
+    return;
+  }
+  const q = $("search").value.trim().toLowerCase();
+  const shown = teams
+    .filter((t) => !q || t.name.toLowerCase().includes(q) || t.abbr.toLowerCase() === q)
+    .sort((a, b) => isFav(lg.key, b) - isFav(lg.key, a));   // my teams first
+  box.innerHTML = "";
+  for (const t of shown.slice(0, 400)) {
+    const on = isFav(lg.key, t);
+    const el = document.createElement("div");
+    el.className = "team" + (on ? " on" : "");
+    const pic = t.logo ? `<img src="${t.logo}" loading="lazy" alt="">`
+                       : `<div class="ph" style="background:#${t.color}">${t.abbr}</div>`;
+    el.innerHTML = `${pic}<div class="tn">${t.short || t.name}</div>`;
+    el.onclick = () => {
+      const list = on ? favs(lg.key).filter((e) => !matches(t, e)) : [...favs(lg.key), t.abbr];
+      const changes = { favorites: { ...cfg.favorites, [lg.key]: list } };
+      if (!on && !cfg.leagues.includes(lg.key)) changes.leagues = [...cfg.leagues, lg.key];  // picking a team turns the sport on
+      save(changes);
+    };
+    box.appendChild(el);
+  }
+}
+
+// ---- live picture of the board ----
+function refreshNow() { $("now").src = "/now.png?t=" + Date.now(); }
+setInterval(refreshNow, 2000);
+refreshNow();
+load();
+</script>
+</body>
+</html>

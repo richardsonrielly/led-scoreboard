@@ -5,6 +5,7 @@ Preview on a laptop:  python3 -m scoreboard.main --console
 """
 import argparse
 import logging
+import socket
 import threading
 import time
 from datetime import datetime
@@ -13,9 +14,34 @@ from . import config, web
 from .display import make_display
 from .espn import fetch_league, select_games
 from .leagues import LEAGUES
-from .render import render_game, render_message
+from .render import render_message, render_pages
 
 log = logging.getLogger("scoreboard")
+
+
+def local_ip():
+    """The Pi's address on the home Wi-Fi (no data is actually sent)."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("10.255.255.255", 1))
+            return s.getsockname()[0]
+    except OSError:
+        return ""
+
+
+class MirroredDisplay:
+    """Wraps the real display so the settings page can show the same picture."""
+
+    def __init__(self, display):
+        self._display = display
+        self.width, self.height = display.width, display.height
+
+    def show(self, img):
+        web.set_current_image(img)
+        self._display.show(img)
+
+    def __getattr__(self, name):
+        return getattr(self._display, name)
 
 
 class Scoreboard:
@@ -61,6 +87,11 @@ class Scoreboard:
 
     def run(self):
         w, h = self.display.width, self.display.height
+        # Show where the settings page is, so it's easy to open on a tablet
+        ip = local_ip()
+        if ip:
+            self.display.show(render_message(["SETTINGS AT", ip, f":{self.cfg['web_port']}"], w, h))
+            self.wait(10)
         self.display.show(render_message(["LOADING", "SCORES..."], w, h))
         while True:
             self.reload_config_if_changed()
@@ -71,10 +102,15 @@ class Scoreboard:
                 self.display.show(render_message([now, "NO GAMES"], w, h))
                 self.wait(10)
                 continue
+            restart = False
             for game in shown:
-                self.display.show(render_game(game, w, h))
-                changed = self.wait(self.cfg["seconds_per_game"])
-                if changed or time.time() - self.last_fetch >= self.cfg["refresh_seconds"]:
+                # The score, then any live details (bases, down & distance...)
+                for page in render_pages(game, self.cfg, w, h):
+                    self.display.show(page)
+                    if self.wait(self.cfg["seconds_per_game"]):
+                        restart = True    # settings changed
+                        break
+                if restart or time.time() - self.last_fetch >= self.cfg["refresh_seconds"]:
                     break  # start over with fresh settings or scores
 
 
@@ -92,7 +128,7 @@ def main():
 
     display = make_display(cfg, force_console=args.console)
     try:
-        Scoreboard(display).run()
+        Scoreboard(MirroredDisplay(display)).run()
     except KeyboardInterrupt:
         display.clear()
 

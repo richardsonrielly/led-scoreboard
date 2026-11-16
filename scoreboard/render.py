@@ -121,3 +121,163 @@ def render_message(lines, width=64, height=32, color=WHITE):
         draw_text(img, (width - text_width(line)) // 2, y, line, color)
         y += 7
     return img
+
+
+# ---------------------------------------------------------------------------
+# Live-game detail pages. Each sport gets its own layout; the main loop flips
+# between the score page and these. On a 128-wide panel they sit side by side.
+# ---------------------------------------------------------------------------
+from PIL import ImageDraw  # noqa: E402
+
+from .config import detail_on  # noqa: E402
+from .leagues import LEAGUES  # noqa: E402
+
+RED = (230, 30, 30)
+DIM = (45, 45, 45)
+BROWN = (190, 95, 30)
+FIELD = (0, 85, 20)
+FIELD_LINE = (0, 140, 40)
+
+
+def ordinal(n):
+    n = int(n)
+    suffix = "TH" if 10 <= n % 100 <= 20 else {1: "ST", 2: "ND", 3: "RD"}.get(n % 10, "TH")
+    return f"{n}{suffix}"
+
+
+def fit(text, width):
+    text = (text or "").upper()
+    while text and text_width(text) > width:
+        text = text[:-1]
+    return text
+
+
+def _base(d, cx, cy, on, r=3):
+    pts = [(cx, cy - r), (cx + r, cy), (cx, cy + r), (cx - r, cy)]
+    d.polygon(pts, fill=YELLOW if on else None, outline=YELLOW if on else GRAY)
+
+
+def _triangle(d, x, y, up, color):
+    if up:
+        d.polygon([(x + 2, y), (x + 4, y + 2), (x, y + 2)], fill=color)
+    else:
+        d.polygon([(x, y), (x + 4, y), (x + 2, y + 2)], fill=color)
+
+
+def baseball_pages(game, cfg, width=64, height=32):
+    s = game.situation
+    on = lambda key: detail_on(cfg, game.league, key)  # noqa: E731
+    show_people = [k for k in ("batter", "pitcher") if on(k) and s.get(k)]
+    if not any(on(k) for k in ("inning", "count", "outs", "bases")) and not show_people:
+        return []
+
+    def page(person_key):
+        img = Image.new("RGB", (width, height))
+        d = ImageDraw.Draw(img)
+        if on("bases"):
+            _base(d, 14, 5, s.get("on_second"))
+            _base(d, 6, 13, s.get("on_third"))
+            _base(d, 22, 13, s.get("on_first"))
+            d.rectangle([13, 20, 15, 21], fill=WHITE)            # home plate
+        x = 31
+        if on("inning") and s.get("inning"):
+            half = s.get("half")
+            if half in ("top", "bottom"):
+                _triangle(d, x, 2, half == "top", WHITE)
+                draw_text(img, x + 6, 1, ordinal(s["inning"]), WHITE)
+            else:
+                draw_text(img, x, 1, f"{half[:3]} {s['inning']}", WHITE)
+        if on("count") and s.get("balls") is not None:
+            nx = draw_text(img, x, 8, "B", GRAY)
+            nx = draw_text(img, nx, 8, str(s["balls"]), GREEN)
+            nx = draw_text(img, nx + 3, 8, "S", GRAY)
+            draw_text(img, nx, 8, str(s.get("strikes", 0)), RED)
+        if on("outs") and s.get("outs") is not None:
+            nx = draw_text(img, x, 15, "OUT", GRAY) + 1
+            for i in range(3):
+                d.ellipse([nx + i * 5, 15, nx + i * 5 + 3, 18], fill=RED if i < s["outs"] else DIM)
+        if person_key:
+            label = "AB " if person_key == "batter" else "P "
+            nx = draw_text(img, 1, 26, label, GRAY)
+            draw_text(img, nx, 26, fit(s[person_key], width - nx - 1), WHITE)
+        return img
+
+    return [page(p) for p in show_people] or [page(None)]
+
+
+def football_pages(game, cfg, width=64, height=32):
+    s = game.situation
+    on = lambda key: detail_on(cfg, game.league, key)  # noqa: E731
+    if not any(on(k) for k in ("possession", "down", "field")):
+        return []
+    offense = game.away if s["possession"] == "away" else game.home
+    defense = game.home if offense is game.away else game.away
+    img = Image.new("RGB", (width, height))
+    d = ImageDraw.Draw(img)
+    red_zone = on("redzone") and s.get("red_zone")
+    if red_zone:
+        d.rectangle([0, 0, width - 1, height - 1], outline=RED)
+
+    if on("possession"):
+        d.ellipse([2, 3, 9, 7], fill=BROWN)                     # the football
+        d.line([4, 5, 7, 5], fill=WHITE)                        # its laces
+        draw_text(img, 12, 1, offense.abbr[:4], team_color(offense), scale=2)
+    if on("down"):
+        draw_text(img, 2, 13, fit(s.get("down_text"), width - 4), RED if red_zone else WHITE)
+        if s.get("spot_text"):
+            draw_text(img, 2, 19, fit("AT " + s["spot_text"], width - 4), GRAY)
+    ytg = s.get("yards_to_goal")
+    if on("field") and ytg is not None:
+        left, right, top, bottom = 2, width - 3, 25, 29
+        ez = 5
+        d.rectangle([left, top, left + ez - 1, bottom], fill=dim(team_color(offense), 0.6))
+        d.rectangle([right - ez + 1, top, right, bottom], fill=dim(team_color(defense), 0.6))
+        f0, f1 = left + ez, right - ez + 1                      # the 100 yards
+        d.rectangle([f0, top, f1 - 1, bottom], fill=FIELD)
+        yard_x = lambda yards: f0 + round(yards * (f1 - f0) / 100)  # noqa: E731
+        for yards in range(10, 100, 10):
+            d.line([yard_x(yards), top, yard_x(yards), bottom], fill=FIELD_LINE)
+        ball = 100 - ytg
+        dist = s.get("distance")
+        if dist and dist < ytg:
+            d.line([yard_x(ball + dist), top - 1, yard_x(ball + dist), bottom + 1], fill=YELLOW)
+        bx = yard_x(ball)
+        d.rectangle([bx - 1, top + 1, bx, bottom - 1], fill=BROWN)
+    return [img]
+
+
+DETAIL_LAYOUTS = {"baseball": baseball_pages, "football": football_pages}
+
+
+def render_pages(game, cfg, width=64, height=32):
+    """All the pages for one game: the score, then any live details."""
+    detail = []
+    layout = DETAIL_LAYOUTS.get(LEAGUES.get(game.league, {}).get("sport"))
+    if layout and game.state == "in" and game.situation:
+        panel_w = 64 if width >= 128 else width
+        detail = layout(game, cfg, panel_w, height)
+    if detail and width >= 128:
+        # Wide panel: score on the left, details on the right
+        pages = []
+        for page in detail:
+            img = Image.new("RGB", (width, height))
+            img.paste(render_game(game, 64, height), (0, 0))
+            img.paste(page, (64, 0))
+            pages.append(img)
+        return pages
+    return [render_game(game, width, height)] + detail
+
+
+def led_look(img, dot=10):
+    """Scale up and draw each pixel as a round LED (for previews)."""
+    w, h = img.size
+    out = Image.new("RGB", (w * dot, h * dot), (12, 12, 12))
+    d = ImageDraw.Draw(out)
+    px = img.load()
+    for y in range(h):
+        for x in range(w):
+            c = px[x, y]
+            if c == (0, 0, 0):
+                c = (28, 28, 28)
+            d.ellipse([x * dot + 1, y * dot + 1, x * dot + dot - 2, y * dot + dot - 2], fill=c)
+    return out
