@@ -29,7 +29,7 @@ FONT = {
     "Z": ["111", "001", "010", "100", "111"],
     " ": ["00", "00", "00", "00", "00"], ":": ["0", "1", "0", "1", "0"],
     ".": ["0", "0", "0", "0", "1"], "-": ["000", "000", "111", "000", "000"],
-    "/": ["001", "001", "010", "100", "100"], "&": ["010", "101", "010", "101", "011"],
+    "/": ["001", "001", "010", "100", "100"], "&": ["0100", "1010", "0100", "1011", "0110"],
     "'": ["1", "1", "0", "0", "0"], "(": ["01", "10", "10", "10", "01"],
     ")": ["10", "01", "01", "01", "10"], "@": ["111", "101", "111", "100", "011"],
 }
@@ -205,11 +205,15 @@ def baseball_pages(game, cfg, width=64, height=32):
     return [page(p) for p in show_people] or [page(None)]
 
 
+def _football_icon(d, x, y):
+    d.ellipse([x, y, x + 6, y + 3], fill=BROWN)                 # the football
+    d.line([x + 2, y + 1, x + 4, y + 1], fill=WHITE)           # its laces
+
+
 def football_pages(game, cfg, width=64, height=32):
+    """One complete screen for a live football game: score, clock, down, field."""
     s = game.situation
     on = lambda key: detail_on(cfg, game.league, key)  # noqa: E731
-    if not any(on(k) for k in ("possession", "down", "field")):
-        return []
     offense = game.away if s["possession"] == "away" else game.home
     defense = game.home if offense is game.away else game.away
     img = Image.new("RGB", (width, height))
@@ -218,17 +222,32 @@ def football_pages(game, cfg, width=64, height=32):
     if red_zone:
         d.rectangle([0, 0, width - 1, height - 1], outline=RED)
 
-    if on("possession"):
-        d.ellipse([2, 3, 9, 7], fill=BROWN)                     # the football
-        d.line([4, 5, 7, 5], fill=WHITE)                        # its laces
-        draw_text(img, 12, 1, offense.abbr[:4], team_color(offense), scale=2)
+    # Top row: AWAY 3 ........ 7 HOME, with a football under whoever has the ball
+    for team, side in ((game.away, "left"), (game.home, "right")):
+        abbr = team.abbr[:4]
+        aw, sw = text_width(abbr), text_width(team.score, scale=2)
+        if side == "left":
+            ax, sx = 2, 2 + aw + 3
+        else:
+            ax = width - 2 - aw
+            sx = ax - 3 - sw
+        draw_text(img, ax, 2, abbr, team_color(team))
+        draw_text(img, sx, 1, team.score, WHITE, scale=2)
+        if on("possession") and team is offense:
+            _football_icon(d, ax + (aw - 7) // 2, 8)
+
+    # Middle: quarter and clock on the left, ball spot on the right
+    status = fit(game.status, width - 4)
+    draw_text(img, 2, 13, status, GREEN)
     if on("down"):
-        draw_text(img, 2, 13, fit(s.get("down_text"), width - 4), RED if red_zone else WHITE)
-        if s.get("spot_text"):
-            draw_text(img, 2, 19, fit("AT " + s["spot_text"], width - 4), GRAY)
+        spot = s.get("spot_text", "").upper()
+        if spot and text_width(status) + text_width(spot) + 4 <= width - 4:
+            draw_text(img, width - 2 - text_width(spot), 13, spot, GRAY)
+        draw_text(img, 2, 19, fit(s.get("down_text"), width - 4), RED if red_zone else WHITE)
+
     ytg = s.get("yards_to_goal")
     if on("field") and ytg is not None:
-        left, right, top, bottom = 2, width - 3, 25, 29
+        left, right, top, bottom = 2, width - 3, 26, 29
         ez = 5
         d.rectangle([left, top, left + ez - 1, bottom], fill=dim(team_color(offense), 0.6))
         d.rectangle([right - ez + 1, top, right, bottom], fill=dim(team_color(defense), 0.6))
@@ -242,17 +261,23 @@ def football_pages(game, cfg, width=64, height=32):
         if dist and dist < ytg:
             d.line([yard_x(ball + dist), top - 1, yard_x(ball + dist), bottom + 1], fill=YELLOW)
         bx = yard_x(ball)
-        d.rectangle([bx - 1, top + 1, bx, bottom - 1], fill=BROWN)
+        d.rectangle([bx - 1, top, bx, bottom], fill=BROWN)
     return [img]
 
 
 DETAIL_LAYOUTS = {"baseball": baseball_pages, "football": football_pages}
+# Sports whose live layout already includes the score and clock, so it
+# replaces the score page instead of alternating with it.
+FULL_LAYOUTS = {"football"}
 
 
 def render_pages(game, cfg, width=64, height=32):
     """All the pages for one game: the score, then any live details."""
     detail = []
-    layout = DETAIL_LAYOUTS.get(LEAGUES.get(game.league, {}).get("sport"))
+    sport = LEAGUES.get(game.league, {}).get("sport")
+    layout = DETAIL_LAYOUTS.get(sport)
+    if sport in FULL_LAYOUTS and game.state == "in" and game.situation:
+        return layout(game, cfg, width, height)
     if layout and game.state == "in" and game.situation:
         panel_w = 64 if width >= 128 else width
         detail = layout(game, cfg, panel_w, height)

@@ -90,6 +90,16 @@ class TestDetails(unittest.TestCase):
         self.assertEqual((s["possession"], s["yards_to_goal"]), ("home", 65))
 
 
+    def test_live_football_is_one_full_screen(self):
+        from scoreboard.render import render_pages
+        g = Game("nfl", "in", "4:12 3RD", "", Team("MIA", "Dolphins", "3", "", "", id="15"),
+                 Team("NYJ", "Jets", "7", "", "", id="20"),
+                 situation={"possession": "home", "down_text": "2nd & 7", "spot_text": "MIA 18",
+                            "yards_to_goal": 18, "distance": 7, "red_zone": False})
+        self.assertEqual(len(render_pages(g, {"details": {}})), 1)          # score is on the same screen
+        self.assertEqual(render_pages(g, {"details": {}}, width=128)[0].size, (128, 32))
+
+
 class TestWeb(unittest.TestCase):
     def setUp(self):
         import os
