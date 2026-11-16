@@ -1,0 +1,4 @@
+requests
+Pillow
+Flask
+# On the Pi you also need rpi-rgb-led-matrix; deploy/install.sh sets it up.

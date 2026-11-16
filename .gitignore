@@ -1,0 +1,12 @@
+# Your personal settings live on the Pi and are changed from the web page,
+# so they're not stored in git (otherwise `git pull` would fight with them).
+config.json
+config.json.tmp
+
+# Python leftovers
+__pycache__/
+*.pyc
+.venv/
+
+# Generated preview image
+/preview.png
