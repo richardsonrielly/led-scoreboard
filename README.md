@@ -11,7 +11,8 @@ web page on your phone, so you never have to open the box.
 - Shows **just your teams** or **every game** in the leagues you pick
 - Teams in team colors, live games in green, start times in yellow, finals in gray (losing team dimmed)
 - **Live game details**, each one switchable on or off:
-  - ⚾ Baseball: top/bottom of the inning, balls and strikes, outs, runners on base, batter, pitcher
+  - ⚾ Baseball: one full screen with the score, top/bottom of the inning, balls and strikes, outs,
+    runners on base, and a little ball under the team at bat; the bottom line flips between batter and pitcher
   - 🏈 Football: one full screen with the score, quarter and clock, plus who has the ball, down and distance,
     the ball's spot, a field map with the yellow first-down line, and a red border in the red zone
 - A kid-friendly **settings page** for any phone or tablet browser on your Wi-Fi:
@@ -122,7 +123,7 @@ sudo systemctl restart scoreboard    # restart after a git pull
 3. Write a `<sport>_pages()` function in `scoreboard/render.py` and add it to `DETAIL_LAYOUTS`.
 
 On a 64-wide panel the details get their own page after the score. On a 128-wide panel (two panels chained,
-`chain_length: 2`) they appear next to the score. A sport listed in `FULL_LAYOUTS` (like football) draws its own
+`chain_length: 2`) they appear next to the score. A sport listed in `FULL_LAYOUTS` (football and baseball) draws its own
 score and clock, so its live screen replaces the score page instead.
 
 ## Ideas for later
