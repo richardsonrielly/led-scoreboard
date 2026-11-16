@@ -164,45 +164,86 @@ def _triangle(d, x, y, up, color):
         d.polygon([(x, y), (x + 4, y), (x + 2, y + 2)], fill=color)
 
 
+def _baseball_icon(d, x, y):
+    d.ellipse([x + 1, y, x + 4, y + 3], fill=WHITE)            # the ball
+    d.point([(x + 2, y + 1)], fill=RED)                        # a stitch
+
+
+def _score_row(img, d, game, icon_team=None, icon=None):
+    """Top row shared by the full-screen layouts: AWAY 3 ........ 7 HOME."""
+    width = img.size[0]
+    edges = []
+    for team, side in ((game.away, "left"), (game.home, "right")):
+        abbr = team.abbr[:4]
+        aw, sw = text_width(abbr), text_width(team.score, scale=2)
+        if side == "left":
+            ax, sx = 1, 1 + aw + 2
+            edges.append(sx + sw)
+        else:
+            ax = width - 1 - aw
+            sx = ax - 2 - sw
+            edges.append(sx)
+        draw_text(img, ax, 2, abbr, team_color(team))
+        draw_text(img, sx, 1, team.score, WHITE, scale=2)
+        if icon and team is icon_team:
+            icon(d, ax + (aw - 7) // 2 + 1, 8)
+    # A little dash between the scores so "10 12" never reads as "1012"
+    gap_left, gap_right = edges
+    if gap_right - gap_left >= 6:
+        mid = (gap_left + gap_right) // 2
+        d.line([mid - 1, 5, mid, 5], fill=GRAY)
+
+
+def last_name(name):
+    parts = (name or "").split()
+    return parts[-1] if parts else ""
+
+
 def baseball_pages(game, cfg, width=64, height=32):
+    """Complete screens for a live baseball game: score, inning, count, outs,
+    bases, and the batter (then the pitcher) on the bottom line."""
     s = game.situation
     on = lambda key: detail_on(cfg, game.league, key)  # noqa: E731
-    show_people = [k for k in ("batter", "pitcher") if on(k) and s.get(k)]
-    if not any(on(k) for k in ("inning", "count", "outs", "bases")) and not show_people:
-        return []
+    half = s.get("half")
+    batting = {"top": game.away, "bottom": game.home}.get(half)
+    people = [k for k in ("batter", "pitcher") if on(k) and s.get(k)]
 
     def page(person_key):
         img = Image.new("RGB", (width, height))
         d = ImageDraw.Draw(img)
-        if on("bases"):
-            _base(d, 14, 5, s.get("on_second"))
-            _base(d, 6, 13, s.get("on_third"))
-            _base(d, 22, 13, s.get("on_first"))
-            d.rectangle([13, 20, 15, 21], fill=WHITE)            # home plate
-        x = 31
+        _score_row(img, d, game, batting, _baseball_icon)
+
+        # Inning (with an up/down arrow for top/bottom)
         if on("inning") and s.get("inning"):
-            half = s.get("half")
             if half in ("top", "bottom"):
-                _triangle(d, x, 2, half == "top", WHITE)
-                draw_text(img, x + 6, 1, ordinal(s["inning"]), WHITE)
+                _triangle(d, 2, 14, half == "top", WHITE)
+                draw_text(img, 8, 13, ordinal(s["inning"]), WHITE)
             else:
-                draw_text(img, x, 1, f"{half[:3]} {s['inning']}", WHITE)
+                draw_text(img, 2, 13, f"{(half or '')[:3]} {s['inning']}".strip(), WHITE)
+        # Balls-strikes and outs
+        x = 2
         if on("count") and s.get("balls") is not None:
-            nx = draw_text(img, x, 8, "B", GRAY)
-            nx = draw_text(img, nx, 8, str(s["balls"]), GREEN)
-            nx = draw_text(img, nx + 3, 8, "S", GRAY)
-            draw_text(img, nx, 8, str(s.get("strikes", 0)), RED)
+            x = draw_text(img, x, 19, str(s["balls"]), GREEN)
+            x = draw_text(img, x, 19, "-", GRAY)
+            x = draw_text(img, x, 19, str(s.get("strikes", 0)), RED) + 4
         if on("outs") and s.get("outs") is not None:
-            nx = draw_text(img, x, 15, "OUT", GRAY) + 1
             for i in range(3):
-                d.ellipse([nx + i * 5, 15, nx + i * 5 + 3, 18], fill=RED if i < s["outs"] else DIM)
+                d.ellipse([x + i * 5, 19, x + i * 5 + 3, 22], fill=RED if i < s["outs"] else DIM)
+        # Batter or pitcher
         if person_key:
             label = "AB " if person_key == "batter" else "P "
-            nx = draw_text(img, 1, 26, label, GRAY)
-            draw_text(img, nx, 26, fit(s[person_key], width - nx - 1), WHITE)
+            nx = draw_text(img, 2, 26, label, GRAY)
+            draw_text(img, nx, 26, fit(last_name(s[person_key]), width - 26 - nx), WHITE)
+        # The diamond, bottom right
+        if on("bases"):
+            cx = width - 12
+            _base(d, cx, 16, s.get("on_second"))
+            _base(d, cx - 7, 23, s.get("on_third"))
+            _base(d, cx + 7, 23, s.get("on_first"))
+            d.rectangle([cx - 1, 29, cx + 1, 30], fill=WHITE)    # home plate
         return img
 
-    return [page(p) for p in show_people] or [page(None)]
+    return [page(p) for p in people] or [page(None)]
 
 
 def _football_icon(d, x, y):
@@ -219,22 +260,12 @@ def football_pages(game, cfg, width=64, height=32):
     img = Image.new("RGB", (width, height))
     d = ImageDraw.Draw(img)
     red_zone = on("redzone") and s.get("red_zone")
-    if red_zone:
-        d.rectangle([0, 0, width - 1, height - 1], outline=RED)
+    if red_zone:                       # red stripes across the top and bottom
+        d.line([0, 0, width - 1, 0], fill=RED)
+        d.line([0, height - 1, width - 1, height - 1], fill=RED)
 
     # Top row: AWAY 3 ........ 7 HOME, with a football under whoever has the ball
-    for team, side in ((game.away, "left"), (game.home, "right")):
-        abbr = team.abbr[:4]
-        aw, sw = text_width(abbr), text_width(team.score, scale=2)
-        if side == "left":
-            ax, sx = 2, 2 + aw + 3
-        else:
-            ax = width - 2 - aw
-            sx = ax - 3 - sw
-        draw_text(img, ax, 2, abbr, team_color(team))
-        draw_text(img, sx, 1, team.score, WHITE, scale=2)
-        if on("possession") and team is offense:
-            _football_icon(d, ax + (aw - 7) // 2, 8)
+    _score_row(img, d, game, offense if on("possession") else None, _football_icon)
 
     # Middle: quarter and clock on the left, ball spot on the right
     status = fit(game.status, width - 4)
@@ -268,7 +299,7 @@ def football_pages(game, cfg, width=64, height=32):
 DETAIL_LAYOUTS = {"baseball": baseball_pages, "football": football_pages}
 # Sports whose live layout already includes the score and clock, so it
 # replaces the score page instead of alternating with it.
-FULL_LAYOUTS = {"football"}
+FULL_LAYOUTS = {"football", "baseball"}
 
 
 def render_pages(game, cfg, width=64, height=32):
