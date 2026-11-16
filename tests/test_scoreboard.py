@@ -74,10 +74,11 @@ class TestDetails(unittest.TestCase):
         g = Game("mlb", "in", "BOT 5TH", "", Team("ATL", "Braves", "3", "", ""), Team("NYM", "Mets", "4", "", ""),
                  situation={"half": "bottom", "inning": 5, "balls": 2, "strikes": 1, "outs": 1,
                             "on_first": True, "batter": "F. Lindor", "pitcher": "S. Strider"})
-        self.assertEqual(len(render_pages(g, {"details": {}})), 3)       # score, batter, pitcher
+        # One full screen with the batter, then the same screen with the pitcher
+        self.assertEqual(len(render_pages(g, {"details": {}})), 2)
         off = {"details": {"mlb": {"batter": False, "pitcher": False}}}
-        self.assertEqual(len(render_pages(g, off)), 2)                    # score, diamond
-        self.assertEqual(len(render_pages(g, {"details": {}}, width=128)), 2)  # side by side
+        self.assertEqual(len(render_pages(g, off)), 1)
+        self.assertEqual(render_pages(g, {"details": {}}, width=128)[0].size, (128, 32))
 
     def test_football_spot_from_text(self):
         data = {"events": [{"competitions": [{
