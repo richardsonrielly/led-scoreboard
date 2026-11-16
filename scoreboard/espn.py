@@ -1,7 +1,7 @@
 """Download scores from ESPN's public scoreboard feed and turn them into Game objects."""
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import requests
 
@@ -19,6 +19,8 @@ class Team:
     color: str        # hex like "203731"
     alt_color: str
     winner: bool = False
+    id: str = ""
+    logo: str = ""
 
 
 @dataclass
@@ -29,6 +31,12 @@ class Game:
     start: str        # ISO start time, used for sorting
     away: Team
     home: Team
+    # Live-game details (only filled in for sports that have them):
+    # baseball: half ("top"/"bottom"/"middle"/"end"), inning, balls, strikes, outs,
+    #           on_first, on_second, on_third, batter, pitcher
+    # football: possession ("home"/"away"), down_text, spot_text, yards_to_goal,
+    #           distance, red_zone
+    situation: dict = field(default_factory=dict)
 
 
 def _team(c):
@@ -40,7 +48,68 @@ def _team(c):
         color=t.get("color") or "FFFFFF",
         alt_color=t.get("alternateColor") or "FFFFFF",
         winner=bool(c.get("winner")),
+        id=str(t.get("id", "")),
+        logo=t.get("logo", ""),
     )
+
+
+def _athlete_name(entry):
+    if not isinstance(entry, dict):
+        return ""
+    a = entry.get("athlete", entry)
+    return a.get("shortName") or a.get("displayName") or ""
+
+
+def parse_situation(sport, state, sit, stype, period, away, home):
+    """Pull the extra live-game info out of ESPN's "situation" block."""
+    if state != "in":
+        return {}
+    sit = sit or {}
+    if sport == "baseball":
+        detail = (stype.get("shortDetail") or stype.get("detail") or "").lower()
+        half = next((h for h, words in (("top", ("top",)), ("bottom", ("bot",)),
+                                         ("middle", ("mid",)), ("end", ("end",)))
+                     if detail.startswith(words)), "")
+        return {
+            "half": half,
+            "inning": period,
+            "balls": sit.get("balls"),
+            "strikes": sit.get("strikes"),
+            "outs": sit.get("outs"),
+            "on_first": bool(sit.get("onFirst")),
+            "on_second": bool(sit.get("onSecond")),
+            "on_third": bool(sit.get("onThird")),
+            "batter": _athlete_name(sit.get("batter")),
+            "pitcher": _athlete_name(sit.get("pitcher")),
+        }
+    if sport == "football":
+        pos = str(sit.get("possession", ""))
+        side = "away" if pos and pos == away.id else "home" if pos and pos == home.id else ""
+        if not side:
+            return {}
+        offense = away if side == "away" else home
+        spot = sit.get("possessionText") or ""        # e.g. "MIA 20" or "50"
+        yards_to_goal = None
+        parts = spot.split()
+        try:
+            yard = int(parts[-1])
+            if len(parts) == 1:               # midfield
+                yards_to_goal = 50
+            elif parts[0] == offense.abbr:     # on our own side of the field
+                yards_to_goal = 100 - yard
+            else:
+                yards_to_goal = yard
+        except (ValueError, IndexError):
+            pass
+        return {
+            "possession": side,
+            "down_text": sit.get("shortDownDistanceText") or "",
+            "spot_text": spot,
+            "yards_to_goal": yards_to_goal,
+            "distance": sit.get("distance"),
+            "red_zone": bool(sit.get("isRedZone")),
+        }
+    return {}
 
 
 def short_status(state, detail):
@@ -66,15 +135,20 @@ def parse_scoreboard(data, league):
         home = next((c for c in competitors if c.get("homeAway") == "home"), None)
         if not away or not home:
             continue
-        stype = (comp.get("status") or event.get("status") or {}).get("type", {})
+        status = comp.get("status") or event.get("status") or {}
+        stype = status.get("type", {})
         state = stype.get("state", "pre")
+        away_t, home_t = _team(away), _team(home)
         games.append(Game(
             league=league,
             state=state,
             status=short_status(state, stype.get("shortDetail") or stype.get("detail")),
             start=event.get("date", ""),
-            away=_team(away),
-            home=_team(home),
+            away=away_t,
+            home=home_t,
+            situation=parse_situation(LEAGUES.get(league, {}).get("sport"), state,
+                                      comp.get("situation"), stype, status.get("period"),
+                                      away_t, home_t),
         ))
     return games
 
@@ -94,7 +168,7 @@ def fetch_league(league, timeout=10):
 
 
 def fetch_teams(league, timeout=10):
-    """List of (abbreviation, name) for the web page's team picker."""
+    """Teams for the settings page's logo picker, sorted by name."""
     teams = {}
     for path in LEAGUES[league]["paths"]:
         try:
@@ -106,10 +180,17 @@ def fetch_teams(league, timeout=10):
                     for t in lg.get("teams", []):
                         t = t.get("team", {})
                         if t.get("abbreviation"):
-                            teams[t["abbreviation"]] = t.get("displayName", t["abbreviation"])
+                            logos = t.get("logos") or [{}]
+                            teams[t["abbreviation"]] = {
+                                "abbr": t["abbreviation"],
+                                "name": t.get("displayName", t["abbreviation"]),
+                                "short": t.get("shortDisplayName") or t.get("name") or "",
+                                "logo": logos[0].get("href", ""),
+                                "color": t.get("color") or "444444",
+                            }
         except (requests.RequestException, ValueError) as e:
             log.warning("Could not load teams for %s: %s", league, e)
-    return sorted(teams.items(), key=lambda kv: kv[1])
+    return sorted(teams.values(), key=lambda t: t["name"])
 
 
 def matches(team, wanted):

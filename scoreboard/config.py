@@ -28,6 +28,11 @@ DEFAULTS = {
         "mens-college-basketball": ["Siena", "Marquette"],
         "usmnt": ["USA"],
     },
+    # Extra live-game info per league, e.g. {"mlb": {"batter": false}}.
+    # Anything not listed is on.
+    "details": {},
+    # Name shown at the top of the settings page
+    "title": "My Scoreboard",
     "brightness": 60,            # 1-100
     "seconds_per_game": 6,       # how long each score stays on screen
     "refresh_seconds": 60,       # how often to download new scores
@@ -79,3 +84,7 @@ def mtime(path=CONFIG_PATH):
         return os.path.getmtime(path)
     except OSError:
         return 0
+
+
+def detail_on(cfg, league, key):
+    return bool(cfg.get("details", {}).get(league, {}).get(key, True))
