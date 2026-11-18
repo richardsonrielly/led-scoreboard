@@ -40,16 +40,19 @@ Scores come from ESPN's public scoreboard feed (no account or API key needed).
 ## Setting up the Pi
 
 1. Flash **Raspberry Pi OS Lite** with Raspberry Pi Imager. In its settings, set the hostname
-   (e.g. `scoreboard`), your Wi-Fi, and turn on SSH.
-2. SSH in: `ssh pi@scoreboard.local`
+   (e.g. `scoreboard`), a username and password, your Wi-Fi, and turn on SSH.
+2. SSH in: `ssh <username>@scoreboard.local`
 3. Get the code and run the installer:
    ```bash
-   git clone https://github.com/<your-username>/led-scoreboard.git
+   sudo apt-get install -y git
+   git clone https://github.com/<your-github-username>/led-scoreboard.git
    cd led-scoreboard
    bash deploy/install.sh
    ```
-4. When the scoreboard starts, it shows its address for 10 seconds (e.g. `192.168.1.42:8080`).
-   Open `http://192.168.1.42:8080` in a browser on your phone or tablet and pick your teams.
+   Adafruit's part of the installer asks a few questions: pick **Adafruit RGB Matrix Bonnet**,
+   **Convenience**, and **yes** to reboot. It can take ~15 minutes on a Pi Zero.
+4. After the reboot the scoreboard starts by itself and shows its address for 10 seconds
+   (e.g. `192.168.1.42:8080`). Open `http://192.168.1.42:8080` in a browser on your phone or tablet.
 
 ### Using it from a kid's Fire tablet
 

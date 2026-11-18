@@ -7,7 +7,7 @@ Wants=network-online.target
 
 [Service]
 WorkingDirectory=/home/pi/led-scoreboard
-ExecStart=/usr/bin/python3 -m scoreboard.main
+ExecStart=/home/pi/led-scoreboard/.venv/bin/python -m scoreboard.main
 Restart=always
 RestartSec=5
 User=root
